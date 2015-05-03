@@ -59,8 +59,10 @@ void music_stop()
 {
 	cli();
 	n_ptr=NULL;
+	set_char_at(0xA5,1,0);
+	cursorTo(2,0);
 	sei();
-}	
+}
 
 void music_start()
 {
@@ -68,6 +70,8 @@ void music_start()
 		index%=N_SONGS;
 		n_ptr=playlist[index];
 		printf("%s\n", playlist_names[index]);
+		set_char_at(0x7e,1,0);
+		cursorTo(2,0);
 	sei();	
 }
 
@@ -78,6 +82,8 @@ void music_next()
 		index%=N_SONGS;
 		n_ptr=playlist[index];
 		printf("%s\n", playlist_names[index]);
+		set_char_at(0x7e,1,0);
+		cursorTo(2,0);
 	sei();	
 }	
 
@@ -111,4 +117,6 @@ void initMusic()
 	playlist[8]=twinkletwinkle();
 	playlist[9]=clementine();
 	printf("%s\n", playlist_names[index]);
+	set_char_at(0xA5,1,0);
+	cursorTo(2,0);
 }

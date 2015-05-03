@@ -40,4 +40,8 @@ int lcd_putchar(char c, FILE *unused);
  */
 extern void init_lcd(void);
 
+void set_display_cursor_blink(char s);
+
+void set_char_at(char c, int line_num, int  x);
+
 #endif // LCD_KEYPAD_M2560_H

@@ -1,6 +1,7 @@
 /* lcd_keypad_m2560.c
  * C driver for SainSmart "LCD Keypad" Shield on Mega2560 Baseboard
  *  V1.0, (c) 2015, Matthias Meier (cleanup lcd timing and refactoring in C)
+ *  V1.1, (c) 2015, Florian Wernli (set char at)
  * Derived from Arduino C++ keypad_lcd library (LCD4Bit_mod.cpp)
  * Remark: neither author nor license condition are known for Arduino lcd_keypad library
 */
@@ -13,17 +14,12 @@
 
 //command bytes for LCD
 #define CMD_CLR 0x01
+#define CMD_HOME 0x02
 #define CMD_RIGHT 0x1C
 #define CMD_LEFT 0x18
-#define CMD_HOME 0x02
 #define CMD_DDADDR(addr) (0x80 | ((addr) & 0x7f))
 
-
-// --------- PINS -------------------------------------
-//is the RW pin assignment of the LCD under our control?  
-// If we're only ever going to write to the LCD, we can use one less microcontroller pin, and just tie the LCD pin to the necessary signal, high or low.
-//this stops us sending signals to the RW pin if it isn't being used.
-#define USING_RW 0
+#define EMPTY_FIRST_COL 1
 
 //original pin assignments of Arduino C++ keypad_lcd library
 //static int RS = 8;
@@ -45,8 +41,8 @@
 #define	RS_BIT		5
 #define	EN_PORT		H
 #define EN_BIT 		6
-#define	RW_PORT		B
-#define	RW_BIT		5
+//#define	RW_PORT		B
+//#define	RW_BIT		5
 //#define	BL_PORT		B	// (external pullup enables backlight when PB4 is defined as input)
 //#define	BL_BIT		4
 
@@ -59,18 +55,41 @@
 #define PORT(x)        GLUE(PORT, x)
 #define PIN(x)         GLUE(PIN, x)
 #define DDR(x)         GLUE(DDR, x)
+#define INPUT			0
 #define OUTPUT			1
-#define digitalWrite(port, bitnr, val) {if (val) PORT(port) |= 1<<bitnr; else PORT(port) &= ~(1<<bitnr);}
-#define pinMode(port, bitnr, val) {if (val) DDR(port) |= 1<<bitnr; else DDR(port) &= ~(1<<bitnr);}
+
+#define digitalWrite(port, bitnr, val) \
+	{\
+		if (val)\
+			PORT(port) |= 1<<bitnr;\
+		else \
+			PORT(port) &= ~(1<<bitnr);\
+	}
+
+#define digitalRead(port, bitnr, out) \
+	{\
+		out<<=1;\
+		out |= (1 & (PIN(port)>>bitnr));\
+	}
+
+#define pinMode(port, bitnr, val) \
+	{\
+		if (val)\
+			DDR(port) |= 1<<bitnr;\
+		else \
+		DDR(port) &= ~(1<<bitnr);\
+	}
 
 //--------------------------------------------------------
 
+static uint8_t cursor_pos;
 
 //pulse the Enable pin high (for a microsecond).
 static void pulseEnablePin(){
   digitalWrite(EN_PORT, EN_BIT, 1);
-  _delay_us(1);
+  _delay_us(2);
   digitalWrite(EN_PORT, EN_BIT, 0);
+  _delay_us(2);
 }
 
 //push a nibble of data through the the LCD's DB4~7 pins, clocking with the Enable pin.
@@ -94,21 +113,18 @@ static void pushByte(int value){
 
 static void commandWriteNibble(int nibble) {
   digitalWrite(RS_PORT, RS_BIT, 0);
-  if (USING_RW) { digitalWrite(RW_PORT, RW_BIT, 0); }
   pushNibble(nibble);
   _delay_us(27);
 }
 
 static void commandWrite(int value) {
   digitalWrite(RS_PORT, RS_BIT, 0);
-  if (USING_RW) { digitalWrite(RW_PORT, RW_BIT, 0); }
   pushByte(value);
   //Remark: some commands needs additional delay!
 }
 
 static void dataWrite(int value) {
   digitalWrite(RS_PORT, RS_BIT, 1);
-  if (USING_RW) { digitalWrite(RW_PORT, RW_BIT, 0); }
   pushByte(value);
 }
 
@@ -116,6 +132,9 @@ static void dataWrite(int value) {
 static void clear(){
   commandWrite(CMD_CLR);
   _delay_ms(2);
+  if(EMPTY_FIRST_COL)
+	commandWrite(0x14);
+  cursor_pos=EMPTY_FIRST_COL;
 }
 
 /*
@@ -137,33 +156,50 @@ int lcd_putchar(char c, FILE *unused)
   }
   else if (c != '\r') {
       dataWrite(c);
+      cursor_pos++;
   } else {	
-      commandWrite(CMD_DDADDR(64));
+      commandWrite(CMD_DDADDR(0x40+EMPTY_FIRST_COL));
+	  cursor_pos=0x40+EMPTY_FIRST_COL;
   }
   return 0;
 }
 
+void set_display_cursor_blink(char s)
+{
+  commandWrite(0x08 | (s&0x07));
+  _delay_us(60);
+}
+
+static void set_db_pin_mode(char m)
+{
+  digitalWrite(DB0_PORT, DB0_BIT,0);
+  digitalWrite(DB1_PORT, DB1_BIT,0);
+  digitalWrite(DB2_PORT, DB2_BIT,0);
+  digitalWrite(DB3_PORT, DB3_BIT,0);
+
+  pinMode(DB0_PORT, DB0_BIT,m);
+  pinMode(DB1_PORT, DB1_BIT,m);
+  pinMode(DB2_PORT, DB2_BIT,m);
+  pinMode(DB3_PORT, DB3_BIT,m);
+}
 
 // initiatize lcd - cursor and blink settings could be overriden after initializing
 void init_lcd() {
   pinMode(EN_PORT, EN_BIT, OUTPUT);
   pinMode(RS_PORT, RS_BIT, OUTPUT);
-  if (USING_RW) { pinMode(RW_PORT, RW_BIT, OUTPUT); }
-  pinMode(DB0_PORT, DB0_BIT,OUTPUT);
-  pinMode(DB1_PORT, DB1_BIT,OUTPUT);
-  pinMode(DB2_PORT, DB2_BIT,OUTPUT);
-  pinMode(DB3_PORT, DB3_BIT,OUTPUT);
+  set_db_pin_mode(OUTPUT);
+
   digitalWrite(EN_PORT, EN_BIT, 0);
 
-  _delay_ms(50);
+  _delay_ms(20);
 
-  //The first 4 nibbles and timings are not in my DEM16217 SYH datasheet, but apparently are HD44780 standard...
+  //init (interface still 8-bit)
   commandWriteNibble(0x03);
   _delay_ms(5);
   commandWriteNibble(0x03);
   _delay_us(100);
   commandWriteNibble(0x03);
-  _delay_ms(5);
+  _delay_us(100);
 
   // needed by the LCDs controller
   //this being 2 sets up 4-bit mode.
@@ -186,12 +222,10 @@ void init_lcd() {
 
   // display control:
   // turn display on, cursor off, no blinking
-  commandWrite(0x0C);
-  _delay_us(60);
+  set_display_cursor_blink(0b100);
 
   //clear display
-  commandWrite(0x01);
-  _delay_ms(3);
+  clear();
 
   // entry mode set: 06
   // increment automatically, display shift, entire shift off
@@ -200,26 +234,28 @@ void init_lcd() {
   _delay_ms(1);//TODO: remove unnecessary delays
 }
 
-
 //non-core stuff --------------------------------------
 //move the cursor to the given absolute position.  line numbers start at 1.
 //if this is not a 2-line LCD4Bit_mod instance, will always position on first line.
 void cursorTo(int line_num, int x){
-  //first, put cursor home
-  commandWrite(CMD_HOME);
-
   //if we are on a 1-line display, set line_num to 1st line, regardless of given
-  if (g_num_lines==1){
-    line_num = 1;
-  }
   //offset 40 chars in if second line requested
-  if (line_num == 2){
-    x += 40;
-  }
-  //advance the cursor to the right according to position. (second line starts at position 40).
-  while (x-- > 0) {
-    commandWrite(0x14);
-  }
+  x += 0x40*(((g_num_lines>line_num)?line_num:g_num_lines)-1);
+
+  commandWrite(CMD_DDADDR(x));
+  cursor_pos=x;
+}
+
+void set_char_at(char c, int line_num, int  x)
+{
+	uint8_t orig_cursor=cursor_pos;
+	//move cursor
+	cursorTo(line_num, x);
+	//write
+	dataWrite(c);
+	//restore cursor
+	commandWrite(CMD_DDADDR(orig_cursor));
+	cursor_pos=orig_cursor;
 }
 
 //scroll whole display to left
