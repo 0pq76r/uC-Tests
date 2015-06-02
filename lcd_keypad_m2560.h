@@ -26,13 +26,17 @@
 
 #include <stdio.h>  // used for FILE struct
 
+#ifndef EMPTY_FIRST_COL
+	#define EMPTY_FIRST_COL 0
+#endif
+
 /*
  * function used by FDEV_SETUP_STREAM() to write a character to the lcd display:
  * '\n' clears the display after the *next* character
  * '\r' sets the cursor address to begin of the second display line
  * other characters are sent to the display
  */
-int lcd_putchar(char c, FILE *unused);
+extern int lcd_putchar(char c, FILE *unused);
 
 /* 
  * initiatize lcd 
@@ -40,8 +44,7 @@ int lcd_putchar(char c, FILE *unused);
  */
 extern void init_lcd(void);
 
-void set_display_cursor_blink(char s);
-
-void set_char_at(char c, int line_num, int  x);
-
+extern void set_display_cursor_blink(char s);
+extern void set_char_at(char c, int line_num, int  x);
+extern void cursorTo(int line_num, int x);
 #endif // LCD_KEYPAD_M2560_H
