@@ -1,55 +1,147 @@
-#define DO_DEBUG 1
+//Wernli Florian
 
-#include "header.h"
-#include "myIO.h"
+#include <avr/io.h>
+#include <avr/interrupt.h>
+#include <avr/pgmspace.h>
+#include <util/delay.h>
 
-void menuAction1(){
-	DEBUG("1\n");
-}
-void menuAction2(){
-	DEBUG("2\n");
-}
-void menuAction3(){
-	DEBUG("3\n");
-}
-void menuAction4(){
-	DEBUG("4\n");
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+
+#define BAUD (9600)
+#define UBR_VAL ((F_CPU/16/BAUD)-1)
+
+#define BUFLEN 512
+
+#define DEBUG 0
+
+enum ADCState{Idle, Triggered, Sending};
+
+static volatile int do_send;
+static volatile uint16_t buf[BUFLEN];
+
+void initADC()
+{
+	ADMUX=(1<<REFS0);
+	ADCSRA=(1<<ADEN)|(1<<ADSC)|(1<<ADATE)|(1<<ADIE)
+		|(1<<ADPS2)|(1<<ADPS1)|(1<<ADPS0);
 }
 
-struct MenuItem_T mainMenu[]= {
-	{"Menu Action1", menuAction1},
-	{"Menu Action2", menuAction2},
-	{"Menu Action3", menuAction3},
-	{"Menu Action4", menuAction4},
-};
+
+ISR(ADC_vect){
+	uint16_t adc=ADC;
+	static int i;
+
+#ifdef DEBUG
+	DDRA=0xff;
+	PORTA^=0xff;
+#endif
+
+	static enum ADCState state=Idle;
+	switch(state)
+	{
+		case Idle:
+#ifdef DEBUG
+	DDRA=0xff;
+	PORTA=0xf0;
+#endif
+
+			if(adc<(1024/2))
+			{
+				i=0;
+				buf[i++]=adc;
+				state=Triggered;
+			}
+		break;
+		case Triggered:
+#ifdef DEBUG
+	DDRA=0xff;
+	PORTA=0x00;
+#endif
+			if(i>=BUFLEN)
+			{
+				do_send=1;
+				state=Sending;
+				break;
+			}
+			buf[i++]=adc;
+		break;		
+		case Sending:
+#ifdef DEBUG
+	DDRA=0xff;
+	PORTA=do_send;
+#endif
+			if((!do_send)&&(adc>(1024/2)))
+			{
+				state=Idle;
+			}
+		break;
+		default:
+			state=Idle;
+		break;
+	}
+}
+
+void inti_send_buf()
+{
+		UBRR0L=UBR_VAL&0xFF;
+		UBRR0H=(UBR_VAL>>8)&0xFF;
+		UCSR0B=(1<<RXEN0)|(1<<TXEN0);
+		UCSR0C=(3<<UCSZ00);
+}
+
+int serial_putchar(char ch, FILE *unused)
+{
+	while(!(UCSR0A&(1<<UDRE0)));
+	UDR0=ch;
+	return 0;
+}
+
+float voltage(uint16_t adc)
+{
+	return ((float)adc)*5.0/1024.0;
+}
 
 int main()
 {	
-	initLCD(); //init stdout
-	initLCDADC(); //init ADC 
+	int i;
+	static FILE fd_stdout= FDEV_SETUP_STREAM(serial_putchar, NULL, _FDEV_SETUP_WRITE);
+	stdout = &fd_stdout;
+	
+	initADC();
+	inti_send_buf();
 
 	sei();
-	
-	DEBUG("Main");
-	
-	LoadMenu(mainMenu);
-	
-	SET(DDRA, PA3);
-	SET(PORTA, PA3);
 
 	while(1){
-		enum LCD_KEY key=get_lcd_key(1);
-		if(key==LCD_KEY_SELECT)
+		if(do_send==0) continue;
+		
+		#ifdef DEBUG
+			DDRC=0xff;
+			PORTC^=0xff;
+		#endif
+
+		for(i=0;i<BUFLEN-1;i++)
 		{
-			SET(PORTA, PA3);
-			ProcessMenu(BUTTON_EXECUTE);
+//			printf("%c,",buf[i]);
+
+			int h=(int)(voltage(buf[i]));
+			int l=(int)((voltage(buf[i])*100)+0.5);
+			if((l-(h*100))>=100)h++;
+			l%=100;
+			printf("%d.%d",l,h);
+			
 		}
-		if(key==LCD_KEY_UP)
-		{
-			ProcessMenu(BUTTON_MENU);
-			CLR(PORTA, PA3);
-		}
-		_delay_ms(500);
+//		printf("%c\n",buf[i]);
+
+		int h=(int)(voltage(buf[i]));
+		int l=(int)((voltage(buf[i])*100)+0.5);
+		if((l-(h*100))>=100)h++;
+		l%=100;
+		printf("%d.%d",l,h);
+
+		do_send=0;
 	}
 }
 
