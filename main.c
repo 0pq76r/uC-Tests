@@ -14,8 +14,6 @@
 
 #define BUFLEN 512
 
-#define DEBUG 0
-
 enum ADCState{Idle, Triggered, Sending};
 
 static volatile int do_send;

@@ -5,17 +5,15 @@ BAUD=-b115200
 
 F_CPU=16000000L
 
-TARGET=main
-
-SOURCES=$(wildcard *.c)
+TARGET=$(SOURCES:.c=)
 OBJECTS=$(SOURCES:.c=.o)
-CFLAGS=-c -Wall -Werror -Os -DF_CPU=$(F_CPU)
-LDFLAGS=-Wl,-u,vfprintf -lprintf_flt -lm
+CFLAGS=-c -Wall -O0 -DF_CPU=$(F_CPU)
+LDFLAGS=
 
 rwildcard=$(foreach d,$(wildcard $1*),$(call rwildcard,$d/,$2) $(filter $(subst *,%,$2),$d))
 DEP=$(call rwildcard, src/, *.c *.h)
  
-all: $(DEP) hex eeprom #program
+all: $(DEP) hex eeprom program
  
 hex: $(TARGET).hex
  
